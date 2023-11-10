@@ -254,7 +254,12 @@ class LBFGS(Optimizer):
         for p in self._params:
             numel = p.numel()
             # view as to avoid deprecated pointwise semantics
-            p.data.add_(step_size, update[offset:offset + numel].view_as(p.data))
+            try:
+                p.data.add_(update[offset:offset + numel].view_as(p.data), alpha=step_size)
+            except:
+                print(step_size, offset, numel)
+                print(update, p, p.data)
+                raise ValueError('Exception occured')
             offset += numel
         assert offset == self._numel()
 
@@ -273,19 +278,19 @@ class LBFGS(Optimizer):
     def line_search(self, line_search):
         """
         Switches line search option.
-        
+
         Inputs:
             line_search (str): designates line search to use
                 Options:
                     'None': uses steplength designated in algorithm
                     'Armijo': uses Armijo backtracking line search
                     'Wolfe': uses Armijo-Wolfe bracketing line search
-        
+
         """
-        
+
         group = self.param_groups[0]
         group['line_search'] = line_search
-        
+
         return
 
     def two_loop_recursion(self, vec):
@@ -323,23 +328,23 @@ class LBFGS(Optimizer):
         q = vec
         for i in range(num_old - 1, -1, -1):
             alpha[i] = old_dirs[i].dot(q) * rho[i]
-            q.add_(-alpha[i], old_stps[i])
+            q.add_(old_stps[i], alpha=-alpha[i])
 
-        # multiply by initial Hessian 
-        # r/d is the final direction
+        # multiply by initial Hessian
         r = torch.mul(q, H_diag)
         for i in range(num_old):
             beta = old_stps[i].dot(r) * rho[i]
-            r.add_(alpha[i] - beta, old_dirs[i])
+            r.add_(old_dirs[i], alpha=alpha[i] - beta)
 
         return r
+
 
     def curvature_update(self, flat_grad, eps=1e-2, damping=False):
         """
         Performs curvature update.
 
         Inputs:
-            flat_grad (tensor): 1-D tensor of flattened gradient for computing 
+            flat_grad (tensor): 1-D tensor of flattened gradient for computing
                 gradient difference with previously stored gradient
             eps (float): constant for curvature pair rejection or damping (default: 1e-2)
             damping (bool): flag for using Powell damping (default: False)
@@ -358,10 +363,10 @@ class LBFGS(Optimizer):
         # variables cached in state (for tracing)
         state = self.state['global_state']
         fail = state.get('fail')
-        
+
         # check if line search failed
         if not fail:
-            
+
             d = state.get('d')
             t = state.get('t')
             old_dirs = state.get('old_dirs')
@@ -369,7 +374,7 @@ class LBFGS(Optimizer):
             H_diag = state.get('H_diag')
             prev_flat_grad = state.get('prev_flat_grad')
             Bs = state.get('Bs')
-    
+
             # compute y's
             y = flat_grad.sub(prev_flat_grad)
             s = d.mul(t)
@@ -378,27 +383,27 @@ class LBFGS(Optimizer):
 
             # update L-BFGS matrix
             if ys > eps * sBs or damping == True:
-    
+
                 # perform Powell damping
                 if damping == True and ys < eps*sBs:
                     if debug:
                         print('Applying Powell damping...')
                     theta = ((1 - eps) * sBs)/(sBs - ys)
                     y = theta * y + (1 - theta) * Bs
-    
+
                 # updating memory
                 if len(old_dirs) == history_size:
                     # shift history by one (limited-memory)
                     old_dirs.pop(0)
                     old_stps.pop(0)
-    
+
                 # store new direction/step
                 old_dirs.append(s)
                 old_stps.append(y)
-    
+
                 # update scale of initial Hessian approximation
                 H_diag = ys / y.dot(y)  # (y*y)
-                
+
                 state['old_dirs'] = old_dirs
                 state['old_stps'] = old_stps
                 state['H_diag'] = H_diag
@@ -581,7 +586,7 @@ class LBFGS(Optimizer):
                     inplace = True
                 else:
                     inplace = options['inplace']
-                    
+
                 if 'ls_debug' not in options.keys():
                     ls_debug = False
                 else:
@@ -654,7 +659,7 @@ class LBFGS(Optimizer):
                     if ls_step == 0 or not interpolate or not is_legal(F_new):
                         t = t/eta
 
-                    # if second step, use function value at new point along with 
+                    # if second step, use function value at new point along with
                     # gradient and function at current iterate
                     elif ls_step == 1 or not is_legal(F_prev):
                         t = polyinterp(np.array([[0, F_k.item(), gtd.item()], [t_new, F_new.item(), np.nan]]))
@@ -662,7 +667,7 @@ class LBFGS(Optimizer):
                     # otherwise, use function values at new point, previous point,
                     # and gradient and function at current iterate
                     else:
-                        t = polyinterp(np.array([[0, F_k.item(), gtd.item()], [t_new, F_new.item(), np.nan], 
+                        t = polyinterp(np.array([[0, F_k.item(), gtd.item()], [t_new, F_new.item(), np.nan],
                                                 [t_prev, F_prev.item(), np.nan]]))
 
                     # if values are too extreme, adjust t
@@ -686,7 +691,7 @@ class LBFGS(Optimizer):
                     F_new = closure()
                     closure_eval += 1
                     ls_step += 1 # iterate
-                    
+
                     # print info if debugging
                     if ls_debug:
                         print('LS Step: %d  t: %.8e  F(x+td):   %.8e  F-c1*t*g*d: %.8e  F(x): %.8e'
@@ -697,7 +702,7 @@ class LBFGS(Optimizer):
                 Bs = (g_Sk.mul(-t)).clone()
             else:
                 Bs.copy_(g_Sk.mul(-t))
-                
+
             # print final steplength
             if ls_debug:
                 print('Final Steplength:', t)
@@ -771,7 +776,7 @@ class LBFGS(Optimizer):
                     inplace = True
                 else:
                     inplace = options['inplace']
-                    
+
                 if 'ls_debug' not in options.keys():
                     ls_debug = False
                 else:
@@ -845,7 +850,7 @@ class LBFGS(Optimizer):
 
                 # print info if debugging
                 if ls_debug:
-                    print('LS Step: %d  t: %.8e  alpha: %.8e  beta: %.8e' 
+                    print('LS Step: %d  t: %.8e  alpha: %.8e  beta: %.8e'
                           % (ls_step, t, alpha, beta))
                     print('Armijo:  F(x+td): %.8e  F-c1*t*g*d: %.8e  F(x): %.8e'
                           % (F_new, F_k + c1 * t * gtd, F_k))
@@ -872,7 +877,7 @@ class LBFGS(Optimizer):
                     g_new = self._gather_flat_grad()
                     grad_eval += 1
                     gtd_new = g_new.dot(d)
-                    
+
                     # print info if debugging
                     if ls_debug:
                         print('Wolfe: g(x+td)*d: %.8e  c2*g*d: %.8e  gtd: %.8e'
@@ -939,7 +944,7 @@ class LBFGS(Optimizer):
                 Bs = (g_Sk.mul(-t)).clone()
             else:
                 Bs.copy_(g_Sk.mul(-t))
-                
+
             # print final steplength
             if ls_debug:
                 print('Final Steplength:', t)
@@ -971,7 +976,7 @@ class LBFGS(Optimizer):
             state['fail'] = False
 
             return t
-        
+
     def step(self, p_k, g_Ok, g_Sk=None, options={}):
         return self._step(p_k, g_Ok, g_Sk, options)
 
